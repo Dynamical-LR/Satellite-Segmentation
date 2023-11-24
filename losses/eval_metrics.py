@@ -1,19 +1,18 @@
 from torch import nn
 import numpy
 
-class DiceLoss(nn.Module):
+class DiceCoefficient(nn.Module):
     """
     Implementation of Dice Loss Function
     """
     def forward(self, predicted_mask, mask: numpy.ndarray):
         intersection = sum((predicted_mask & mask).flatten())
         union = sum((predicted_mask + mask).flatten())
-        return 1 - (2 * intersection / union)
-
+        return (2 * intersection / union)
 
 class F1Score(nn.Module):
     """
-    Implementation of the F1 Score metric
+    Implementation of the Averaged F1 Score metric
     """
     def _calculate_recall(self, pred_mask, mask):
         pass 

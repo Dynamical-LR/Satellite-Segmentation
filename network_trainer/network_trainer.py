@@ -1,8 +1,9 @@
 import torch 
 from torch.utils import data 
 from torch import nn
+from losses import eval_metrics
 
-from dataset import SegmentationDataset
+from dataset.dataset import SegmentationDataset
 
 from tqdm import tqdm 
 import logging
@@ -40,7 +41,6 @@ class NetworkTrainer(object):
         network: nn.Module,
         optimizer: nn.Module,
         loss_function: nn.Module,
-        eval_metric: nn.Module,
         batch_size: int,
         max_epochs: int,
         train_device='cpu',
@@ -53,10 +53,10 @@ class NetworkTrainer(object):
         self.network = network
         self.container_string
         self.loss_function = loss_function
-        self.eval_metric = eval_metric
+        self.eval_metric = eval_metrics.F1Score()
         self.lr_scheduler = lr_scheduler
         
-    def freeze_encoder(self, layers_to_freeze: typing.List[nn.Module]):
+    def freeze_layers(self, layers_to_freeze: typing.List[nn.Module]):
         """
         Function freezes network layers, specified in
         a given list 'layers_to_freeze'
@@ -119,6 +119,7 @@ class NetworkTrainer(object):
 
         total_val_metric = []
         with torch.no_grad():
+
             for imgs, masks in loader:
                 try:
                     predicted_masks = self.network.forward(
@@ -134,5 +135,7 @@ class NetworkTrainer(object):
                     logger.debug(err)
                     raise RuntimeError(
                     "Failed to predict mask, check logs for more info")
-
         return numpy.mean(total_val_metric)
+
+    def save_network(self, model_path: str, test_input: torch.tensor):
+        torch.onnx.export(model=self.network, args=test_input, f=model_path)
