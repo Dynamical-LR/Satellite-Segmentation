@@ -34,8 +34,9 @@ class FocalLoss(nn.Module):
         super(FocalLoss, self).__init__()
         self.gamma = gamma
 
-    def forward(self, y_pred, y_true):
+    def forward(self, y_pred: torch.Tensor, y_true: torch.Tensor):
         # Flatten the predictions and ground truth masks
+        
         y_pred_flat = y_pred.view(-1)
         y_true_flat = y_true.view(-1)
 

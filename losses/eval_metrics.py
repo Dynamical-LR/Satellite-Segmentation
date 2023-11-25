@@ -25,20 +25,25 @@ class F1Score(nn.Module):
     Returns:
         float: F1 score.
     """
+    def __init__(self):
+        super(F1Score, self).__init__()
+        self.epsilon = 0.00001
         
-    def forward(y_pred: torch.Tensor, y_true: torch.Tensor, threshold=0.5):
+    def forward(self, y_pred: torch.Tensor, y_true: torch.Tensor, threshold=0.5):
         
-        y_pred_bin = (y_pred > threshold).float()
-        y_true_bin = y_true.float()
-      
+        y_true = y_true.numpy().flatten()
+        y_pred = y_pred.numpy().flatten()
+        
         # Calculate true positives, false positives, and false negatives
-        true_positives = torch.sum((y_pred_bin == 1) & (y_true_bin == 1)).item()
-        false_positives = torch.sum((y_pred_bin == 1) & (y_true_bin == 0)).item()
-        false_negatives = torch.sum((y_pred_bin == 0) & (y_true_bin == 1)).item()
+        tp = (y_true * y_pred).sum(axis=0)
+        fp = ((1 - y_true) * y_pred).sum(axis=0)
+        fn = (y_true * (1 - y_pred)).sum(axis=0)
 
         # Calculate precision, recall, and F1 score
-        precision = true_positives / (true_positives + false_positives + 1e-10)
-        recall = true_positives / (true_positives + false_negatives + 1e-10)
-        f1 = 2 * (precision * recall) / (precision + recall + 1e-10)
-        return f1
+        precision = tp / (tp + fp + self.epsilon)
+        recall = tp / (tp + fn + self.epsilon)
+        f1 = 2 * (precision * recall) / (precision + recall + self.epsilon)
 
+        # Average over classes (assuming the input tensors are batched)
+        f1 = f1.mean()
+        return max(0, f1.item())
