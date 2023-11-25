@@ -1,53 +1,54 @@
 from torch import nn 
 import numpy
-from torch import functional as F
+from torch.nn import functional as F
 import torch
 
 
 class DiceLoss(nn.Module):
-    """
-    Implementation of the Dice Loss Function
     
-    Parameters:
-    -----------
-    
-    eps - constant for preventing division by zero
-    """
-    def __init__(self, eps: float):
+    def __init__(self, smooth=1e-8):
         super(DiceLoss, self).__init__()
-        self.eps = eps
+        self.smooth = smooth # smoothing factor for avoiding division by zero
 
-    def forward(self, predicted_mask_of_probs, true_mask):
-        predicted_mask = numpy.argmax(predicted_mask_of_probs, axis=1)
-        intersection = torch.sum(predicted_mask * true_mask)
-        union = torch.sum(predicted_mask) + torch.sum(true_mask)
-        dice = (2.0 * intersection + self.eps) / (union + self.eps)
-        loss = 1.0 - dice
-        return loss
+    def forward(self, y_pred, y_true):
 
+        # Flatten the tensors
+        y_pred_flat = y_pred.view(-1)
+        y_true_flat = y_true.view(-1)
+
+        # Calculate intersection and union
+        intersection = torch.sum(y_pred_flat * y_true_flat)
+        union = torch.sum(y_pred_flat) + torch.sum(y_true_flat)
+
+        # Calculate Dice coefficient
+        dice_coefficient = (2.0 * intersection + self.smooth) / (union + self.smooth)
+
+        # Calculate Dice Loss
+        dice_loss = 1 - dice_coefficient
+
+        return dice_loss
 
 class FocalLoss(nn.Module):
 
-    def __init__(self, gamma):
+    def __init__(self, gamma=2):
         super(FocalLoss, self).__init__()
         self.gamma = gamma
 
-    def forward(self, predicted_mask_of_probs, true_mask):
-        
-        # Binary cross entropy loss term
-        bce_loss = F.binary_cross_entropy(predicted_mask_of_probs, true_mask, reduction='none')
-        predicted_binary_mask = torch.argmax(predicted_mask_of_probs, keepdim=True, dim=1)
+    def forward(self, y_pred, y_true):
+        # Flatten the predictions and ground truth masks
+        y_pred_flat = y_pred.view(-1)
+        y_true_flat = y_true.view(-1)
 
-        # Focal loss term
-        focal_loss = (1 - predicted_binary_mask) ** self.gamma * bce_loss
+        # Calculate binary cross-entropy loss
+        bce_loss = F.binary_cross_entropy_with_logits(y_pred_flat, y_true_flat, reduction='none')
 
-        # Mask to only consider positive samples (where actual_mask == 1)
-        positive_mask = (true_mask == 1)
+        # Calculate focal loss
+        focal_loss = (1 - torch.exp(-bce_loss)) ** self.gamma * bce_loss
 
-        # Combine the losses for positive and negative samples
-        loss = torch.sum(positive_mask * focal_loss + (1 - positive_mask) * bce_loss)
+        # Calculate mean over all elements
+        mean_loss = torch.mean(focal_loss)
 
-        return loss
+        return mean_loss
 
 class ComboLoss(nn.Module):
     """
@@ -55,25 +56,30 @@ class ComboLoss(nn.Module):
 
     Parameters:
     ----------
-    first_prop - proportion percentage for focal loss
-    second_prop - proportion percentage for dice loss
+    dice_prop - proportion percentage for focal loss
+    focal_prop - proportion percentage for dice loss
+    focal_gamma - gamma value for focal loss
+    dice_eps - dice coefficinet epsilon for preventing division by zero
     """
-    def __init__(self, first_prop: float, second_prop: float, focal_gamma: float):
+    def __init__(self, dice_prop: float, focal_prop: float, focal_gamma: float):
         super(ComboLoss, self).__init__()
 
         self.focal_loss = FocalLoss(gamma=focal_gamma)
         self.dice_loss = DiceLoss()
-        self.first_prop = first_prop
-        self.second_prop = second_prop
+        self.dice_prop = dice_prop
+        self.focal_prop = focal_prop
 
-        if first_prop + second_prop != 1.0:
+        if dice_prop + focal_prop != 1.0:
             raise ValueError(
             msg='first and second props must equal to 1 in summary'
             )
     
-    def forward(self, predicted_mask_of_probs: numpy.ndarray, true_mask: numpy.ndarray):
+    def forward(self, predicted_mask_of_probs: torch.Tensor, true_mask: torch.Tensor):
         focal_loss = self.focal_loss(predicted_mask_of_probs, true_mask)
         dice_loss = self.dice_loss(predicted_mask_of_probs, true_mask)
-        return self.first_prop * focal_loss + self.second_prop * dice_loss
+        return self.focal_prop * focal_loss + self.dice_prop * dice_loss
 
 
+
+    
+    

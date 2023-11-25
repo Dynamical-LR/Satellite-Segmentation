@@ -50,8 +50,7 @@ class NetworkTrainer(object):
         self.batch_size = batch_size
         self.train_device = train_device
         self.optimizer = optimizer
-        self.network = network
-        self.container_string
+        self.network = network.to(self.train_device)
         self.loss_function = loss_function
         self.eval_metric = eval_metrics.F1Score()
         self.lr_scheduler = lr_scheduler
@@ -68,8 +67,15 @@ class NetworkTrainer(object):
     def train(self, train_dataset: SegmentationDataset):
 
         self.network.train()
-        train_data = data.DataLoader(train_dataset, self.batch_size)
+        
+        train_data = data.DataLoader(
+            dataset=train_dataset, 
+            batch_size=self.batch_size,
+            shuffle=True
+        )
+        
         best_cl_loss = None
+        train_loss_history = []
 
         for epoch in range(self.max_epochs):
 
@@ -77,22 +83,28 @@ class NetworkTrainer(object):
 
             for imgs, masks in tqdm(train_data):
                 
-                # masks of probabilities [ [0.4, 0.6], [0.2, 0.8] ] 
-
+                # masks of probabilities [ [0.4, 0.6], [0.2, 0.8] ]
+                
                 predicted_masks = self.network.forward(
-                    imgs.float().to(self.train_device)
-                ).cpu()
-    
+                imgs.to(self.train_device)).cpu()
+                
+                total_loss = 0
+                total_losses = []
+                
                 # computing loss function
-                losses = self.loss_function(predicted_masks, masks)
-
+                for idx, pred_mask in enumerate(predicted_masks):
+                    loss = self.loss_function(pred_mask, masks[idx])
+                    total_loss += loss.item()
+                    total_losses.append(loss)
+                
+                total_loss_func = sum(total_losses)
                 # backward step 
-                losses.backward()
+                total_loss_func.backward()
 
                 # optimizer step 
                 self.optimizer.step()
 
-                epoch_losses.append(losses)
+                epoch_losses.append(total_loss)
 
             # learning scheduling step
             if self.lr_scheduler:
@@ -101,10 +113,23 @@ class NetworkTrainer(object):
             avg_loss = numpy.mean(epoch_losses)
 
             if best_cl_loss is None or best_cl_loss > avg_loss:
-                    best_cl_loss = avg_loss
-
+                best_cl_loss = avg_loss
+                    
+            train_loss_history.append(avg_loss)
             print('%s epochs passed' % str(epoch))
-        return best_cl_loss
+            
+            if epoch % 5 == 0:
+                self.save_checkpoint(best_cl_loss, epoch)
+            
+        return best_cl_loss, train_loss_history
+    
+    def save_checkpoint(self, loss, epoch):
+        torch.save(
+            obj={
+                'network_state': self.network.state_dict(),
+                'optimizer_state': self.optmizer.state_dict(),
+            }, f='../checkpoints/checkpoint_epoch_%s.pth' % str(epoch)
+        )
 
     def evaluate(self, validation_dataset: SegmentationDataset):
         """
@@ -112,19 +137,23 @@ class NetworkTrainer(object):
         set of validation samples
         """
         self.network.eval()
+        
         loader = data.DataLoader(
             dataset=validation_dataset, 
-            batch_size=self.batch_size
+            batch_size=self.batch_size,
+            shuffle=True
         ) 
 
         total_val_metric = []
+        
         with torch.no_grad():
 
             for imgs, masks in loader:
                 try:
                     predicted_masks = self.network.forward(
                         imgs.float().to(self.train_device)
-                    ).cpu()
+                    ).cpu().to(torch.uint8)
+                    
                     eval_metric = self.eval_metric(
                         predicted_masks, 
                         masks
@@ -136,6 +165,10 @@ class NetworkTrainer(object):
                     raise RuntimeError(
                     "Failed to predict mask, check logs for more info")
         return numpy.mean(total_val_metric)
-
+    
+    def predict(self, image: numpy.ndarray):
+        predicted_mask = self.network.forward(image.to(self.train_device)).cpu()
+        return predicted_mask
+    
     def save_network(self, model_path: str, test_input: torch.tensor):
         torch.onnx.export(model=self.network, args=test_input, f=model_path)
